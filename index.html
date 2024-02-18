@@ -1,95 +1,149 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Object Detection with WebRTC</title>
     <style>
-        body {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-            height: 100vh;
-            margin: 0;
-        }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        height: 100vh;
+        margin: 0;
+      }
 
-        video, canvas {
-            margin-top: 10px; /* Margin antara video dan canvas */
-        }
+      video,
+      canvas {
+        margin-top: 10px; /* Margin antara video dan canvas */
+      }
+      video {
+        display: none;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <h1>Client-Side Object Detection WebRTC</h1>
+    <label for="cameraSelect">Select Camera:</label>
+    <select id="cameraSelect" onchange="changeCamera()"></select>
     <video id="webcam" width="640" height="480" autoplay></video>
     <canvas id="canvas" width="640" height="480"></canvas>
-    <div id="personCount">Person Count: 0</div> <!-- Container untuk menampilkan jumlah person -->
+    <div id="personCount">Person Count: 0</div>
+    <!-- Container untuk menampilkan jumlah person -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
-  
+
     <script>
-        navigator.mediaDevices.getUserMedia({ video: true })
-            .then((stream) => {
-                const video = document.getElementById('webcam');
-                const canvas = document.getElementById('canvas');
-                const context = canvas.getContext('2d');
-                const personCountElement = document.getElementById('personCount'); // Elemen untuk menampilkan jumlah person
-                let personCount = 0; // Variabel untuk menyimpan jumlah person
-                
-                video.srcObject = stream;
+      const videoSelect = document.getElementById("cameraSelect");
+      const video = document.getElementById("webcam");
+      const context = canvas.getContext("2d");
 
-                video.onloadedmetadata = () => {
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    detectObjects(video, context);
-                };
-            })
-            .catch((error) => {
-                console.error('Error accessing camera:', error);
-            });
+      const handleError = (error) => {
+        console.error("Error: ", error);
+      };
 
-        async function detectObjects(video, context) {
-            const model = await cocoSsd.load();
-            detect();
+      const gotStream = (stream) => {
+        window.stream = stream; // make stream available to console
+        videoSelect.selectedIndex = [...videoSelect.options].findIndex(
+          (option) => option.text === stream.getVideoTracks()[0].label
+        );
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          detectObjects(video, context);
+        };
+      };
 
-            async function detect() {
-                context.save(); // Simpan keadaan konteks
-                context.scale(-1, 1); // Flip horizontal
-                context.drawImage(video, -canvas.width, 0, canvas.width, canvas.height); // Gambar video ke canvas dengan flip
-                context.restore(); // Pulihkan keadaan konteks
-
-                const predictions = await model.detect(video);
-                drawPredictions(predictions, context);
-                updatePersonCount(predictions);
-                requestAnimationFrame(detect);
-            }
-
-            function drawPredictions(predictions, context) {
-                predictions.forEach(prediction => {
-                    // Koordinat flip untuk mempertahankan posisi bbox yang benar
-                    const flippedX = canvas.width - (prediction.bbox[0] + prediction.bbox[2]);
-                    context.beginPath();
-                    context.rect(flippedX, prediction.bbox[1], prediction.bbox[2], prediction.bbox[3]);
-                    context.lineWidth = 2;
-                    context.strokeStyle = 'red';
-                    context.fillStyle = 'red';
-                    context.font = '12px Arial';
-                    context.fillText(`${prediction.class} (${Math.round(prediction.score * 100)}%)`, flippedX, prediction.bbox[1] > 10 ? prediction.bbox[1] - 5 : 10);
-                    context.stroke();
-                });
-            }
-
-            function updatePersonCount(predictions) {
-                // Menghitung jumlah person berdasarkan kelas 'person'
-                const personPredictions = predictions.filter(prediction => prediction.class === 'person');
-                personCount = personPredictions.length;
-                
-                // Menampilkan jumlah person di elemen HTML
-                document.getElementById('personCount').innerText = `Person Count: ${personCount}`;
-            }
+      const getStream = () => {
+        if (window.stream) {
+          window.stream.getTracks().forEach((track) => {
+            track.stop();
+          });
         }
+        const videoSource = videoSelect.value;
+        const constraints = {
+          audio: false,
+          video: { deviceId: videoSource ? { exact: videoSource } : undefined },
+        };
+        return navigator.mediaDevices
+          .getUserMedia(constraints)
+          .then(gotStream)
+          .catch(handleError);
+      };
 
-        document.getElementById('webcam').style.display = 'none'; // Menyembunyikan tag video menggunakan JavaScript
+      const gotDevices = (deviceInfos) => {
+        window.deviceInfos = deviceInfos; // make available to console
+        console.log("Available input and output devices:", deviceInfos);
+        for (const deviceInfo of deviceInfos) {
+          const option = document.createElement("option");
+          option.value = deviceInfo.deviceId;
+          if (deviceInfo.kind === "videoinput") {
+            option.text =
+              deviceInfo.label || `Camera ${videoSelect.length + 1}`;
+            videoSelect.appendChild(option);
+          }
+        }
+      };
+
+      const detectObjects = async (video, context) => {
+        const model = await cocoSsd.load();
+        const detect = async () => {
+          context.save();
+          context.scale(-1, 1);
+          context.drawImage(video, -video.width, 0, video.width, video.height);
+          context.restore();
+
+          const predictions = await model.detect(video);
+          drawPredictions(predictions, context);
+          updatePersonCount(predictions);
+          requestAnimationFrame(detect);
+        };
+
+        const drawPredictions = (predictions, context) => {
+          predictions.forEach((prediction) => {
+            const flippedX =
+              video.width - (prediction.bbox[0] + prediction.bbox[2]);
+            context.beginPath();
+            context.rect(
+              flippedX,
+              prediction.bbox[1],
+              prediction.bbox[2],
+              prediction.bbox[3]
+            );
+            context.lineWidth = 2;
+            context.strokeStyle = "red";
+            context.fillStyle = "red";
+            context.font = "12px Arial";
+            context.fillText(
+              `${prediction.class} (${Math.round(prediction.score * 100)}%)`,
+              flippedX,
+              prediction.bbox[1] > 10 ? prediction.bbox[1] - 5 : 10
+            );
+            context.stroke();
+          });
+        };
+
+        const updatePersonCount = (predictions) => {
+          const personPredictions = predictions.filter(
+            (prediction) => prediction.class === "person"
+          );
+          const personCount = personPredictions.length;
+          document.getElementById(
+            "personCount"
+          ).innerText = `Person Count: ${personCount}`;
+        };
+
+        detect();
+      };
+
+      const getDevices = () => {
+        return navigator.mediaDevices.enumerateDevices();
+      };
+
+      videoSelect.onchange = getStream;
+      getStream().then(getDevices).then(gotDevices);
     </script>
-</body>
+  </body>
 </html>
