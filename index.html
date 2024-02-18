@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Object Detection with WebRTC</title>
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            height: 100vh;
+            margin: 0;
+        }
+
+        video, canvas {
+            margin-top: 10px; /* Margin antara video dan canvas */
+        }
+    </style>
+</head>
+<body>
+    <h1>Client-Side Object Detection WebRTC</h1>
+    <video id="webcam" width="640" height="480" autoplay></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
+    <div id="personCount">Person Count: 0</div> <!-- Container untuk menampilkan jumlah person -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  
+    <script>
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then((stream) => {
+                const video = document.getElementById('webcam');
+                const canvas = document.getElementById('canvas');
+                const context = canvas.getContext('2d');
+                const personCountElement = document.getElementById('personCount'); // Elemen untuk menampilkan jumlah person
+                let personCount = 0; // Variabel untuk menyimpan jumlah person
+                
+                video.srcObject = stream;
+
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    detectObjects(video, context);
+                };
+            })
+            .catch((error) => {
+                console.error('Error accessing camera:', error);
+            });
+
+        async function detectObjects(video, context) {
+            const model = await cocoSsd.load();
+            detect();
+
+            async function detect() {
+                context.save(); // Simpan keadaan konteks
+                context.scale(-1, 1); // Flip horizontal
+                context.drawImage(video, -canvas.width, 0, canvas.width, canvas.height); // Gambar video ke canvas dengan flip
+                context.restore(); // Pulihkan keadaan konteks
+
+                const predictions = await model.detect(video);
+                drawPredictions(predictions, context);
+                updatePersonCount(predictions);
+                requestAnimationFrame(detect);
+            }
+
+            function drawPredictions(predictions, context) {
+                predictions.forEach(prediction => {
+                    // Koordinat flip untuk mempertahankan posisi bbox yang benar
+                    const flippedX = canvas.width - (prediction.bbox[0] + prediction.bbox[2]);
+                    context.beginPath();
+                    context.rect(flippedX, prediction.bbox[1], prediction.bbox[2], prediction.bbox[3]);
+                    context.lineWidth = 2;
+                    context.strokeStyle = 'red';
+                    context.fillStyle = 'red';
+                    context.font = '12px Arial';
+                    context.fillText(`${prediction.class} (${Math.round(prediction.score * 100)}%)`, flippedX, prediction.bbox[1] > 10 ? prediction.bbox[1] - 5 : 10);
+                    context.stroke();
+                });
+            }
+
+            function updatePersonCount(predictions) {
+                // Menghitung jumlah person berdasarkan kelas 'person'
+                const personPredictions = predictions.filter(prediction => prediction.class === 'person');
+                personCount = personPredictions.length;
+                
+                // Menampilkan jumlah person di elemen HTML
+                document.getElementById('personCount').innerText = `Person Count: ${personCount}`;
+            }
+        }
+
+        document.getElementById('webcam').style.display = 'none'; // Menyembunyikan tag video menggunakan JavaScript
+    </script>
+</body>
+</html>
